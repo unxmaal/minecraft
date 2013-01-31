@@ -57,7 +57,7 @@ CPU_COUNT=1
 INVOCATION="java -Xmx4096M -Xms4096M -XX:+UseConcMarkSweepGC -XX:+CMSIncrementalPacing -XX:ParallelGCThreads=$CPU_COUNT -XX:+AggressiveOpts -jar $SERVICE nogui"
 # Where the world backups should go
 BACKUPPATH='/minecraft/web/backups'
-# Where the logs are copied when running log-roll
+# Where the logs are copied when running logrotate
 LOGPATH="${MCPATH}/logs"
 # Where the world is located on the disk
 WORLDSTORAGE='/minecraft/server/diskworld'
@@ -144,12 +144,38 @@ mc_stop() {
     fi
 }
 
-log_roll() {
-    mc_stop
-    DATE=`date "+%Y-%m-%d"`
-    mv $MCPATH/server.log $MCPATH/logs/server-$DATE.log
-    gzip $MCPATH/logs/server-$DATE.log
-    mc_start
+#log_roll() {
+#    mc_stop
+#    DATE=`date "+%Y-%m-%d"`
+#    mv $MCPATH/server.log $MCPATH/logs/server-$DATE.log
+#    gzip $MCPATH/logs/server-$DATE.log
+#    mc_start
+#}
+
+
+logrotate() {
+    LOGLIST=$(ls -r $MCPATH/server.log* | grep -v lck)
+    COUNT=6
+    for i in $LOGLIST; do
+        LOGTMP=$(ls $i | cut -d "." -f 3)
+        if [ -zz $LOGTMP ]
+            then
+            LOGTMP="$MCPATH/server.log"
+            LOGNEW="$LOGTMP.1"
+            as_user "/bin/cp $MCPATH/server.log $LOGNEW"
+        elif [ $LOGTMP -gt $COUNT ]
+        then
+            as_user "rm -f $i"
+        else
+            LOGBASE=$(ls $i | cut -d "." -f 1-2)
+            LOGNEW=$LOGBASE.$(($LOGTMP+1))
+            as_user "/bin/cp $i $LOGNEW"
+        fi
+    done
+
+    as_user "cat /dev/null > $MCPATH/server.log"
+    
+
 }
 
 mc_world_backup() {
@@ -188,24 +214,28 @@ mc_git_add_commit() {
     as_user "cd $MCPATH && git add -A && git commit -a -m \"Automated backup at `date`\""
 }
 
+# Parameters passed to script
+
 case "$1" in
 start)
 # Starts the server
-#to_ram
 mc_start
 ;;
+
 stop)
 # Stops the server
-as_user "screen -p 0 -S minecraft -X eval 'stuff \"say SERVER SHUTTING DOWN!\"\015'"
+as_user "screen -p 0 -S minecraft -X eval 'stuff \"say Server shutting down!\"\015'"
+
 mc_stop
-#to_disk
 ;;
+
 restart)
 # Restarts the server
-as_user "screen -p 0 -S minecraft -X eval 'stuff \"say SERVER REBOOT IN 10 SECONDS.\"\015'"
+as_user "screen -p 0 -S minecraft -X eval 'stuff \"say Restarting server for log rotation.\"\015'"
 mc_stop
 mc_start
 ;;
+
 backup)
 # Backups world
 as_user "screen -p 0 -S minecraft -X eval 'stuff \"say Backing up world.\"\015'"
@@ -213,8 +243,10 @@ mc_saveoff
 #mc_world_backup
 mc_git_add_commit
 mc_saveon
+
 as_user "screen -p 0 -S minecraft -X eval 'stuff \"say Backup complete.\"\015'"
 ;;
+
 to-disk)
 # Writes from the ramdisk to disk, in case the server crashes.
 # Using ramdisk speeds things up alot, especially if you allow
@@ -224,20 +256,18 @@ mc_saveoff
 echo "No-op because we don't use ramdisk so we don't need to do this."
 mc_saveon
 ;;
+
 connected)
 # Lists connected users
 as_user "screen -p 0 -S minecraft -X eval 'stuff list\015'"
 sleep 3s
 tac $MCPATH/server.log | grep -m 0 "Connected"
 ;;
-log-roll)
-# Moves and Gzips the logfile, a big log file slows down the
-# server ALOT (what was notch thinking?)
-as_user "screen -p 0 -S minecraft -X eval 'stuff \"say SERVER REBOOT IN 10 SECONDS.\"\015'"
-mc_stop
-log_roll
-mc_start
+
+logrotate)
+logrotate
 ;;
+
 status)
 # Shows server status
 if pgrep -f SCREEN > /dev/null
@@ -249,7 +279,7 @@ fi
 ;;
 
 *)
-echo "Usage: /etc/init.d/minecraft {start|stop|backup|log-roll|to-disk|connected|status|restart}"
+echo "Usage: /etc/init.d/minecraft {start|stop|backup|logrotate|to-disk|connected|status|restart}"
 exit 1
 ;;
 esac
