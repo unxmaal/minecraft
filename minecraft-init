@@ -191,7 +191,7 @@ mc_git_add_commit() {
 case "$1" in
 start)
 # Starts the server
-to_ram
+#to_ram
 mc_start
 ;;
 stop)
